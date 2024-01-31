@@ -1,0 +1,361 @@
+import React, { useState } from 'react';
+import { connect } from 'react-redux';
+import Modal from 'react-modal';
+
+function RoomTable({ rooms, darkMode, onSelectRooms, hotelname }) {
+  const [selectedRooms, setSelectedRooms] = useState({});
+  const [isPaymentModalOpen, setPaymentModalOpen] = useState(false);
+
+  const handleRoomTypeChange = (roomType, value) => {
+    setSelectedRooms((prevRooms) => {
+      const updatedRooms = { ...prevRooms };
+      updatedRooms[roomType] = value;
+      return updatedRooms;
+    });
+  };
+
+  const handleGuestsChange = (roomType, value) => {
+    setSelectedRooms((prevRooms) => {
+      const updatedRooms = { ...prevRooms };
+      updatedRooms[roomType] = {
+        ...updatedRooms[roomType],
+        numberOfGuests: value,
+      };
+      return updatedRooms;
+    });
+  };
+
+  const handleReservation = (roomType, reservationType) => {
+    const { roomNumber, numberOfGuests } = selectedRooms[roomType] || { roomNumber: '', numberOfGuests: 0 };
+    onSelectRooms(selectedRooms);
+
+    // Add validation for the number of guests based on room type
+    let isValidReservation = true;
+    switch (roomType) {
+      case 'Deluxe Room':
+        isValidReservation = numberOfGuests <= 2;
+        break;
+      case 'Family Room':
+        isValidReservation = numberOfGuests <= 6;
+        break;
+      case 'Suite':
+        isValidReservation = numberOfGuests <= 4;
+        break;
+      default:
+        isValidReservation = true; // Allow reservations for other room types
+    }
+
+    if (isValidReservation) {
+      // Show the payment modal
+      setPaymentModalOpen(true);
+    } else {
+      alert(`Invalid number of guests for ${roomType} room type`);
+      // You can customize the alert message based on your needs
+    }
+  };
+
+  const closePaymentModal = () => {
+    // Close the payment modal
+    setPaymentModalOpen(false);
+  };
+
+  return (
+    <div>
+      <h2>Available Rooms</h2>
+      <table className={`table ${darkMode ? "dark" : ""}`}>
+        <thead>
+          <tr>
+            <th>Room Type</th>
+            <th>Number of Guests</th>
+            <th>Price per Night</th>
+            <th>Select Room</th>
+            <th>Reservation Type</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rooms.map((room, index) => (
+            <tr key={index}>
+              <td>
+                <h3>{room.roomType}</h3>
+                {room.description && (
+                  <p>
+                    <strong>Description:</strong>
+                    <ul>
+                      {room.description.map((point, pointIndex) => (
+                        <li key={pointIndex}>{point}</li>
+                      ))}
+                    </ul>
+                  </p>
+                )}
+              </td>
+              <td>
+                <input
+                  className="room"
+                  type="number"
+                  name={`guests_${room.roomType}`}
+                  placeholder="0"
+                  onChange={(e) => handleGuestsChange(room.roomType, e.target.value)}
+                />
+              </td>
+              <td>{room.pricePerNight}</td>
+              <td>
+                <select
+                  className="room-type"
+                  name={`room_${room.roomType}`}
+                  value={selectedRooms[room.roomType]?.roomNumber || ''}
+                  onChange={(e) => handleRoomTypeChange(room.roomType, { ...selectedRooms[room.roomType], roomNumber: e.target.value })}
+                >
+                  <option value="">Select Room</option>
+                  {room.availableRooms.map((roomNumber) => (
+                    <option key={roomNumber} value={roomNumber}>
+                      Room {roomNumber}
+                    </option>
+                  ))}
+                </select>
+              </td>
+              <td>
+                <button className='table_btn' onClick={() => handleReservation(room.roomType, 'Reserve')}>Reserve</button>
+                <br />
+                <br />
+                <button
+                  className='table_btn'
+                  onClick={() => handleReservation(selectedRooms.roomType, 'Reserve and Pay')}
+                >Reserve and Pay</button>
+
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <Modal isOpen={isPaymentModalOpen} onRequestClose={closePaymentModal}>
+        {/* Payment details, hotel name, room type, etc. */}
+        <h2>Payment Details</h2>
+        <p>Hotel: {hotelname}</p>
+        <p>Room Type: {selectedRooms.roomType}</p>
+        <p>Room Number: {selectedRooms.roomNumber}</p>
+        <p>Number of Guests: {selectedRooms.numberOfGuests}</p>
+
+        {/* Your payment gateway logic here */}
+        {/* ... */}
+        <button onClick={closePaymentModal}>Close</button>
+      </Modal>
+    </div>
+  );
+}
+
+const mapStateToProps = (state) => ({
+  darkMode: state.darkMode,
+});
+
+export default connect(mapStateToProps)(RoomTable);
+
+
+
+
+
+
+
+import React, { useEffect, useState } from 'react';
+import { connect } from 'react-redux';
+import Modal from 'react-modal';
+import PaymentGateway from './paymentGetaway';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faTimes } from '@fortawesome/free-solid-svg-icons';
+import {firebaseApp } from '../signup/firebase'; // Import the firestore instance from your firebase.js file
+import { auth } from '../signup/firebase'; // Import the auth instance from your firebase.js file
+import {
+  getFirestore,
+  collection,
+  addDoc,
+} from 'firebase/firestore';
+function RoomTable({ rooms, darkMode, hotelname }) {
+  const [selectedReservation, setSelectedReservation] = useState(null);
+  const [selectedRooms, setSelectedRooms] = useState({});
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [parsedSelectedHotelData, setParsedSelectedHotelData] = useState(null);
+
+  useEffect(() => {
+    // Retrieve data from local storage
+    const storedSelectedHotelData = localStorage.getItem('selectedHotelData');
+    const parsedData = storedSelectedHotelData ? JSON.parse(storedSelectedHotelData) : "";
+    setParsedSelectedHotelData(parsedData);
+  }, []);
+
+  const handleRoomTypeChange = (roomType, value) => {
+    setSelectedRooms((prevRooms) => {
+      const updatedRooms = { ...prevRooms };
+      updatedRooms[roomType] = value;
+      return updatedRooms;
+    });
+  };
+
+  const handleGuestsChange = (roomType, value) => {
+    setSelectedRooms((prevRooms) => {
+      const updatedRooms = { ...prevRooms };
+      updatedRooms[roomType] = {
+        ...updatedRooms[roomType],
+        numberOfGuests: value,
+      };
+      return updatedRooms;
+    });
+  };
+
+  const handleReservation = async (roomType, reservationType) => {
+    const { roomNumber, numberOfGuests } = selectedRooms[roomType] || {
+      roomNumber: '',
+      numberOfGuests: 0,
+    };
+  
+    const roomDetails = rooms.find((room) => room.roomType === roomType);
+  
+    // Add validation for the number of guests based on room type
+    let isValidReservation = true;
+    switch (roomType) {
+      case 'deluxe':
+        isValidReservation = numberOfGuests <= 2;
+        break;
+      case 'family':
+        isValidReservation = numberOfGuests <= 4;
+        break;
+      case 'suite':
+        isValidReservation = numberOfGuests <= 3;
+        break;
+      default:
+        isValidReservation = true; // Allow reservations for other room types
+    }
+  
+    if (isValidReservation) {
+      const reservationDetails = {
+        roomType,
+        roomNumber,
+        numberOfGuests,
+        pricePerNight: parseFloat(roomDetails.pricePerNight.replace('$', '')), // Parse the price to a number
+        reservationType,
+        CheckIn:parsedSelectedHotelData[0].checkIn,
+        CheckOut:parsedSelectedHotelData[0].checkOut,
+        Totalamount : parseInt(selectedReservation.pricePerNight) * parseInt(parsedSelectedHotelData[0].day)+"$",
+        status:"Unpaid"
+
+      };
+      setSelectedReservation(reservationDetails);
+  
+      // Save reservation data to Firestore only when the "Reserve" button is clicked
+      if (reservationType === 'Reserve') {
+        try {
+          const reservationsCollection = collection(getFirestore(firebaseApp), 'reservations');
+          await addDoc(reservationsCollection, {
+            userId: auth.currentUser.uid,
+            ...reservationDetails,
+          });
+          console.log('Reservation data saved to Firestore successfully!');
+        } catch (error) {
+          console.error('Error saving reservation data to Firestore: ', error.message);
+        }
+      }
+  
+      if (reservationType === 'Reserve and Pay') {
+        setIsModalOpen(true);
+        document.body.style.overflow = 'hidden';
+      }
+    } else {
+      alert(`Invalid number of guests for ${roomType} room type`);
+    }
+  };
+  
+  const closeModal = () => {
+    setSelectedReservation(null);
+    setIsModalOpen(false);
+    document.body.style.overflow = 'auto';
+  };
+
+  return (
+    <div>
+      <h2>Available Rooms</h2>
+      <table className={`table ${darkMode ? "dark" : ""}`}>
+        <thead>
+          <tr>
+            <th>Room Type</th>
+            <th>Number of Guests</th>
+            <th>Price per Night</th>
+            <th>Select Room</th>
+            <th>Reservation Type</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rooms.map((room, index) => (
+            <tr key={index}>
+              <td>
+                <h3>{room.roomType}</h3>
+                {room.description && (
+                  <p>
+                    <strong>Description:</strong>
+                    <ul>
+                      {room.description.map((point, pointIndex) => (
+                        <li key={pointIndex}>{point}</li>
+                      ))}
+                    </ul>
+                  </p>
+                )}
+              </td>
+              <td>
+                <input
+                  className="room"
+                  type="number"
+                  name={`guests_${room.roomType}`}
+                  placeholder="0"
+                  onChange={(e) => handleGuestsChange(room.roomType, e.target.value)}
+                />
+              </td>
+              <td>{room.pricePerNight}</td>
+              <td>
+                <select
+                  className="room-type"
+                  name={`room_${room.roomType}`}
+                  value={selectedRooms[room.roomType]?.roomNumber || ''}
+                  onChange={(e) => handleRoomTypeChange(room.roomType, { ...selectedRooms[room.roomType], roomNumber: e.target.value })}
+                >
+                  <option value="">Select Room</option>
+                  {room.availableRooms.map((roomNumber) => (
+                    <option key={roomNumber} value={roomNumber}>
+                      Room {roomNumber}
+                    </option>
+                  ))}
+                </select>
+              </td>
+              <td>
+                <button className='table_btn' onClick={() => handleReservation(room.roomType, 'Reserve')}>Reserve</button>
+                <br />
+                <br />
+                <button className='table_btn' onClick={() => handleReservation(room.roomType, 'Reserve and Pay')}>Reserve and Pay</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <Modal isOpen={isModalOpen} onRequestClose={closeModal} contentLabel="Payment Details Modal" className={`md ${darkMode ? "dark" : ""}`}>
+        <h2>{hotelname}</h2>
+        {selectedReservation && (
+          <div>
+            <p>Room Type: {selectedReservation.roomType}</p>
+            <p>Room Number: {selectedReservation.roomNumber}</p>
+            <p>Number of Guests: {selectedReservation.numberOfGuests}</p>
+            <p>checkIn: {parsedSelectedHotelData[0].checkIn}</p>
+            <p>checkIn: {parsedSelectedHotelData[0].checkOut}</p>
+            <p>checkIn: {parsedSelectedHotelData[0].day}</p>
+            <p>Total amount = {parseInt(selectedReservation.pricePerNight) * parseInt(parsedSelectedHotelData[0].day)}$</p>
+          </div>
+        )}
+        <button className="close-button" onClick={closeModal}>
+          <FontAwesomeIcon icon={faTimes} />
+        </button>
+        {selectedReservation && <PaymentGateway reservationDetails={selectedReservation} onClose={closeModal} />}
+      </Modal>
+    </div>
+  );
+}
+
+const mapStateToProps = (state) => ({
+  darkMode: state.darkMode,
+});
+
+export default connect(mapStateToProps)(RoomTable);
